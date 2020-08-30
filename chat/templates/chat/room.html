@@ -1,0 +1,117 @@
+<!-- chat/templates/chat/room.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <title>Chat Room</title>
+</head>
+<body>
+<table id="chat-log-div">
+    <tr>
+        <th>user</th>
+        <th>message</th>
+        <th>timestamp</th>
+    </tr>
+</table>
+<br/>
+<input id="chat-message-input" type="text" size="100" aria-label="enter message"><br>
+<input id="chat-message-submit" type="button" value="Send">
+{{ room_name|json_script:"room-name" }}
+{{ user_name|json_script:"user-name" }}
+<form id="file-form">{% csrf_token %}
+    <input type="file" id="file-input">
+    <button type="submit">Add Attachment</button>
+</form>
+
+<script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+<script>
+    const roomName = JSON.parse(document.getElementById('room-name').textContent);
+    const userName = JSON.parse(document.getElementById('user-name').textContent);
+
+    const chatSocket = new WebSocket(
+        'ws://'
+        + window.location.host
+        + '/ws/chat/'
+        + roomName
+        + '/'
+        + userName
+        + '/'
+    );
+
+    const fileForm = document.getElementById('file-form');
+    const fileFormEvent = fileForm.addEventListener('submit', e => {
+        e.preventDefault();
+        let fileInput = document.getElementById('file-input');
+        let file = fileInput.files[0];
+
+        let formData = new FormData();
+        formData.append("attachment", file);
+        formData.append("author", userName);
+        axios.post("/chat/api/add-message-attachment/", formData, {
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                'Content-Type': 'multipart/form-data'
+            }
+        }).then(res => {
+            chatSocket.send(JSON.stringify({
+                'message': res.data.instance.message
+            }));
+        }).catch(err => {
+            console.log(err.response.data)
+        })
+    })
+
+    chatSocket.onmessage = e => {
+        const data = JSON.parse(e.data);
+
+        let msgRow = document.createElement('tr');
+        let userTD = document.createElement('td').appendChild(document.createTextNode(data.message['author']));
+        msgRow.appendChild(userTD);
+
+        let msgTD = document.createElement('td');
+        if (data.message.message.includes("[[ATTACHMENT]]:")) {
+            let img = document.createElement('img');
+            const [, attachmentType, src] = data.message.message.split(":");
+            img.alt = attachmentType;
+            img.setAttribute("src", src);
+            img.setAttribute("height", "150");
+            img.setAttribute("width", "150");
+            msgTD.appendChild(img);
+        } else {
+            msgTD.appendChild(document.createTextNode(data.message.message));
+        }
+        msgRow.appendChild(msgTD);
+
+        let timeTD = document.createElement('td').appendChild(document.createTextNode(data.message.timestamp));
+        msgRow.appendChild(timeTD);
+
+        document.getElementById('chat-log-div').appendChild(msgRow);
+
+        {#console.log(data.message);#}
+        {#document.querySelector('#chat-log').value += (data.message.message + '\t' + data.message.timestamp + '\n');#}
+    };
+
+    chatSocket.onclose = e => {
+        console.log(e);
+        console.error('Chat socket closed unexpectedly');
+    };
+
+    document.querySelector('#chat-message-input').focus();
+    document.querySelector('#chat-message-input').onkeyup = function (e) {
+        if (e.keyCode === 13) {  // enter, return
+            document.querySelector('#chat-message-submit').click();
+        }
+    };
+
+    document.querySelector('#chat-message-submit').onclick = function (e) {
+        console.log(e);
+        const messageInputDom = document.querySelector('#chat-message-input');
+        const message = messageInputDom.value;
+        chatSocket.send(JSON.stringify({
+            'message': message
+        }));
+        messageInputDom.value = '';
+    };
+</script>
+</body>
+</html>
